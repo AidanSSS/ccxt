@@ -109,7 +109,7 @@ class huobi(Exchange):
                 'fetchOrderTrades': True,
                 'fetchPartiallyFilledOrders': None,
                 'fetchPosition': True,
-                'fetchPositions': None,
+                'fetchPositions': True,
                 'fetchPositionsRisk': None,
                 'fetchPremiumIndexOHLCV': True,
                 'fetchStatus': None,
@@ -4397,7 +4397,7 @@ class huobi(Exchange):
         self.load_markets()
         market = self.market(symbol)
         marginType = self.safe_string_2(self.options, 'defaultMarginType', 'marginType', 'isolated')
-        marketType, query = self.handle_market_type_and_params('fetchPositions', market, params)
+        marketType, query = self.handle_market_type_and_params('fetchPosition', market, params)
         method = None
         if market['linear']:
             method = self.get_supported_mapping(marginType, {
@@ -4500,3 +4500,70 @@ class huobi(Exchange):
             'timestamp': timestamp,
             'datetime': self.iso8601(timestamp),
         })
+
+    def parse_positions(self, positions):
+        #
+        #     {
+        #       symbol: 'BTC',
+        #       contract_code: 'BTC-USDT',
+        #       volume: '1.000000000000000000',
+        #       available: '1.000000000000000000',
+        #       frozen: '0E-18',
+        #       cost_open: '47162.000000000000000000',
+        #       cost_hold: '47151.300000000000000000',
+        #       profit_unreal: '0.007300000000000000',
+        #       profit_rate: '-0.000144183876850008',
+        #       lever_rate: '2',
+        #       position_margin: '23.579300000000000000',
+        #       direction: 'buy',
+        #       profit: '-0.003400000000000000',
+        #       last_price: '47158.6',
+        #       margin_asset: 'USDT',
+        #       margin_mode: 'isolated',
+        #       margin_account: 'BTC-USDT',
+        #       margin_balance: '24.973020070000000000',
+        #       margin_position: '23.579300000000000000',
+        #       margin_frozen: '0',
+        #       margin_available: '1.393720070000000000',
+        #       profit_real: '0E-18',
+        #       risk_rate: '1.044107779705080303',
+        #       withdraw_available: '1.386420070000000000000000000000000000',
+        #       liquidation_price: '22353.229148614609571788',
+        #       adjust_factor: '0.015000000000000000',
+        #       margin_static: '24.965720070000000000'
+        #     }
+        #
+        result = []
+        for i in range(0, len(positions)):
+            position = positions[i]
+            parsed = self.parse_position(position)
+            result.append(parsed)
+        return result
+
+    def fetch_positions(self, symbols=None, params={}):
+        if symbols is not None:
+            if not isinstance(symbols, list):
+                raise ArgumentsRequired(self.id + ' fetchPositions requires an array argument for symbols')
+        self.load_markets()
+        defaultType = self.safe_string(self.options, 'defaultType', 'future')
+        type = self.safe_string(params, 'type', defaultType)
+        defaultSubType = self.safe_string(self.options, 'defaultSubType', 'inverse')
+        subType = self.safe_string(params, 'subType', defaultSubType)
+        marginType = self.safe_string_2(self.options, 'defaultMarginType', 'marginType', 'isolated')
+        query = self.omit(params, 'type')
+        method = None
+        if type == 'future':
+            method = 'contractPrivatePostApiV1ContractPositionInfo'
+        elif type == 'swap':
+            if subType == 'inverse':
+                method = 'contractPrivatePostSwapApiV1SwapPositionInfo'
+            elif subType == 'linear':
+                if marginType == 'isolated':
+                    method = 'contractPrivatePostLinearSwapApiV1SwapPositionInfo'
+                elif marginType == 'cross':
+                    method = 'contractPrivatePostLinearSwapApiV1SwapCrossPositionInfo'
+        response = getattr(self, method)(query)
+        positions = self.safe_value(response, 'data')
+        result = self.parse_positions(positions)
+        # return self.filter_by_array(result, 'symbol', symbols, False)
+        return result

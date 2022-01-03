@@ -109,7 +109,7 @@ class huobi(Exchange):
                 'fetchOrderTrades': True,
                 'fetchPartiallyFilledOrders': None,
                 'fetchPosition': True,
-                'fetchPositions': None,
+                'fetchPositions': True,
                 'fetchPositionsRisk': None,
                 'fetchPremiumIndexOHLCV': True,
                 'fetchStatus': None,
@@ -4397,7 +4397,7 @@ class huobi(Exchange):
         await self.load_markets()
         market = self.market(symbol)
         marginType = self.safe_string_2(self.options, 'defaultMarginType', 'marginType', 'isolated')
-        marketType, query = self.handle_market_type_and_params('fetchPositions', market, params)
+        marketType, query = self.handle_market_type_and_params('fetchPosition', market, params)
         method = None
         if market['linear']:
             method = self.get_supported_mapping(marginType, {
@@ -4500,3 +4500,39 @@ class huobi(Exchange):
             'timestamp': timestamp,
             'datetime': self.iso8601(timestamp),
         })
+
+    def parse_positions(self, positions):
+        result = []
+        for i in range(0, len(positions)):
+            position = positions[i]
+            parsed = self.parse_position(position)
+            result.append(parsed)
+        return result
+
+    async def fetch_positions(self, symbols=None, params={}):
+        if symbols is not None:
+            if not isinstance(symbols, list):
+                raise ArgumentsRequired(self.id + ' fetchPositions requires an array argument for symbols')
+        await self.load_markets()
+        defaultType = self.safe_string(self.options, 'defaultType', 'future')
+        type = self.safe_string(params, 'type', defaultType)
+        defaultSubType = self.safe_string(self.options, 'defaultSubType', 'inverse')
+        subType = self.safe_string(params, 'subType', defaultSubType)
+        marginType = self.safe_string_2(self.options, 'defaultMarginType', 'marginType', 'isolated')
+        query = self.omit(params, 'type')
+        method = None
+        if type == 'future':
+            method = 'contractPrivatePostApiV1ContractPositionInfo'
+        elif type == 'swap':
+            if subType == 'inverse':
+                method = 'contractPrivatePostSwapApiV1SwapPositionInfo'
+            elif subType == 'linear':
+                if marginType == 'isolated':
+                    method = 'contractPrivatePostLinearSwapApiV1SwapPositionInfo'
+                elif marginType == 'cross':
+                    method = 'contractPrivatePostLinearSwapApiV1SwapCrossPositionInfo'
+        response = await getattr(self, method)(query)
+        positions = self.safe_value(response, 'data')
+        result = self.parse_positions(positions)
+        # return self.filter_by_array(result, 'symbol', symbols, False)
+        return result

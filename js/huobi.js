@@ -84,7 +84,7 @@ module.exports = class huobi extends Exchange {
                 'fetchOrderTrades': true,
                 'fetchPartiallyFilledOrders': undefined,
                 'fetchPosition': true,
-                'fetchPositions': undefined,
+                'fetchPositions': true,
                 'fetchPositionsRisk': undefined,
                 'fetchPremiumIndexOHLCV': true,
                 'fetchStatus': undefined,
@@ -4657,7 +4657,7 @@ module.exports = class huobi extends Exchange {
         await this.loadMarkets ();
         const market = this.market (symbol);
         const marginType = this.safeString2 (this.options, 'defaultMarginType', 'marginType', 'isolated');
-        const [ marketType, query ] = this.handleMarketTypeAndParams ('fetchPositions', market, params);
+        const [ marketType, query ] = this.handleMarketTypeAndParams ('fetchPosition', market, params);
         let method = undefined;
         if (market['linear']) {
             method = this.getSupportedMapping (marginType, {
@@ -4761,5 +4761,80 @@ module.exports = class huobi extends Exchange {
             'timestamp': timestamp,
             'datetime': this.iso8601 (timestamp),
         });
+    }
+
+    parsePositions (positions) {
+        //
+        //     {
+        //       symbol: 'BTC',
+        //       contract_code: 'BTC-USDT',
+        //       volume: '1.000000000000000000',
+        //       available: '1.000000000000000000',
+        //       frozen: '0E-18',
+        //       cost_open: '47162.000000000000000000',
+        //       cost_hold: '47151.300000000000000000',
+        //       profit_unreal: '0.007300000000000000',
+        //       profit_rate: '-0.000144183876850008',
+        //       lever_rate: '2',
+        //       position_margin: '23.579300000000000000',
+        //       direction: 'buy',
+        //       profit: '-0.003400000000000000',
+        //       last_price: '47158.6',
+        //       margin_asset: 'USDT',
+        //       margin_mode: 'isolated',
+        //       margin_account: 'BTC-USDT',
+        //       margin_balance: '24.973020070000000000',
+        //       margin_position: '23.579300000000000000',
+        //       margin_frozen: '0',
+        //       margin_available: '1.393720070000000000',
+        //       profit_real: '0E-18',
+        //       risk_rate: '1.044107779705080303',
+        //       withdraw_available: '1.386420070000000000000000000000000000',
+        //       liquidation_price: '22353.229148614609571788',
+        //       adjust_factor: '0.015000000000000000',
+        //       margin_static: '24.965720070000000000'
+        //     }
+        //
+        const result = [];
+        for (let i = 0; i < positions.length; i++) {
+            const position = positions[i];
+            const parsed = this.parsePosition (position);
+            result.push (parsed);
+        }
+        return result;
+    }
+
+    async fetchPositions (symbols = undefined, params = {}) {
+        if (symbols !== undefined) {
+            if (!Array.isArray (symbols)) {
+                throw new ArgumentsRequired (this.id + ' fetchPositions requires an array argument for symbols');
+            }
+        }
+        await this.loadMarkets ();
+        const defaultType = this.safeString (this.options, 'defaultType', 'future');
+        const type = this.safeString (params, 'type', defaultType);
+        const defaultSubType = this.safeString (this.options, 'defaultSubType', 'inverse');
+        const subType = this.safeString (params, 'subType', defaultSubType);
+        const marginType = this.safeString2 (this.options, 'defaultMarginType', 'marginType', 'isolated');
+        const query = this.omit (params, 'type');
+        let method = undefined;
+        if (type === 'future') {
+            method = 'contractPrivatePostApiV1ContractPositionInfo';
+        } else if (type === 'swap') {
+            if (subType === 'inverse') {
+                method = 'contractPrivatePostSwapApiV1SwapPositionInfo';
+            } else if (subType === 'linear') {
+                if (marginType === 'isolated') {
+                    method = 'contractPrivatePostLinearSwapApiV1SwapPositionInfo';
+                } else if (marginType === 'cross') {
+                    method = 'contractPrivatePostLinearSwapApiV1SwapCrossPositionInfo';
+                }
+            }
+        }
+        const response = await this[method] (query);
+        const positions = this.safeValue (response, 'data');
+        const result = this.parsePositions (positions);
+        // return this.filterByArray (result, 'symbol', symbols, false);
+        return result;
     }
 };
